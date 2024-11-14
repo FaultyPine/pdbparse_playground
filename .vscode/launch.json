@@ -1,0 +1,13 @@
+{
+    "configurations": [
+        {
+            "name": "(Windows) Attach",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}\\PDBParse\\main.exe",
+            "cwd": "${workspaceRoot}/PDBParse",
+            "console": "integratedTerminal"
+        },
+        
+    ]
+}

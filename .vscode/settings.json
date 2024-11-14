@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "*.type": "metadesk",
+        "tupfile": "plaintext",
+        "xutility": "cpp"
+    }
+}
