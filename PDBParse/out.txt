@@ -1,0 +1,8 @@
+Version 20000404, signature 1731812332, age 2, GUID a779582f-7a85-4666-997c7bf4cb4aa42f
+processing 4 relevant modules
+	C:\Users\gclar\AppData\Local\Temp\main-7d1d0f.o
+Found static local data g_appstate
+	C:\Users\gclar\AppData\Local\Temp\more-aa357a.o
+Found static local data g_moreglobaldata
+	C:\Users\gclar\AppData\Local\Temp\hash-e809dc.o
+	C:\Dev\pdbparse_playground\TestProj\main.exp

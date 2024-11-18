@@ -34,7 +34,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow
     wc.lpszClassName = CLASS_NAME;
 
     RegisterClass(&wc);
-
     // Create the window.
     HWND hwnd = CreateWindowEx(
         0,                              // Optional window styles.
@@ -57,6 +56,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow
     }
 
     DoStuff();
+    MoreRandomOperations();
 
     ShowWindow(hwnd, nCmdShow);
 

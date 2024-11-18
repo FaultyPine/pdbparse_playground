@@ -8,30 +8,22 @@
 #include "PDB_TPIStream.h"
 #include "PDB_NamesStream.h"
 
-#include "mapped_file.h"
+#include "typetable.h"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#undef WIN32_LEAN_AND_MEAN
-#endif
+#include "mapped_file.h"
+#include <vector>
 
 // mostly 1:1 with
 // https://github.com/MolecularMatters/raw_pdb/blob/main/src/Examples/ExampleMain.cpp
 PDB_NO_DISCARD static bool HasValidDBIStreams(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStream);
 PDB_NO_DISCARD static bool IsError(PDB::ErrorCode errorCode);
 
-void ProcessSymbols(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStream)
+
+void public_symbols_stream(
+    const PDB::PublicSymbolStream& publicSymbolStream,
+    const PDB::CoalescedMSFStream& symbolRecordStream,
+    const PDB::ImageSectionStream& imageSectionStream)
 {
-    // needed for both public and global streams
-    const PDB::CoalescedMSFStream symbolRecordStream = dbiStream.CreateSymbolRecordStream(rawPdbFile);
-    const PDB::PublicSymbolStream publicSymbolStream = dbiStream.CreatePublicSymbolStream(rawPdbFile);
-	const PDB::GlobalSymbolStream globalSymbolStream = dbiStream.CreateGlobalSymbolStream(rawPdbFile);
-	const PDB::ModuleInfoStream moduleInfoStream = dbiStream.CreateModuleInfoStream(rawPdbFile);
-    const PDB::ImageSectionStream imageSectionStream = dbiStream.CreateImageSectionStream(rawPdbFile);
-    
-    // public symbols stream
-    {
     const PDB::ArrayView<PDB::HashRecord> hashRecords = publicSymbolStream.GetRecords();
     const size_t count = hashRecords.GetLength();
     printf("=== Public symbols stream ===\n");
@@ -53,10 +45,13 @@ void ProcessSymbols(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStr
         printf("%s : %i\n", record->data.S_PUB32.name, rva);
     }
     printf("===================\n");
-    }
+}
 
-    // global symbols stream
-    {
+void global_symbols_stream(
+    const PDB::GlobalSymbolStream& globalSymbolStream,
+    const PDB::CoalescedMSFStream& symbolRecordStream,
+    const PDB::ImageSectionStream& imageSectionStream)
+{
     const PDB::ArrayView<PDB::HashRecord> hashRecords = globalSymbolStream.GetRecords();
     const size_t count = hashRecords.GetLength();
     printf("=== Global symbols stream ===\n");
@@ -112,12 +107,17 @@ void ProcessSymbols(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStr
         printf("%s : %i\n", name, rva);
     }
     printf("===================\n");
-    }
-	
-    // module symbols stream
-    {
+}
+
+void module_symbol_stream(
+    const PDB::ModuleInfoStream& moduleInfoStream,
+    const PDB::CoalescedMSFStream& symbolRecordStream,
+    const PDB::ImageSectionStream& imageSectionStream,
+    const PDB::RawFile& rawPdbFile)
+{
     printf("=== Module symbols stream ===\n");
     const PDB::ArrayView<PDB::ModuleInfoStream::Module> modules = moduleInfoStream.GetModules();
+    printf("LinkerModule: %s\n", moduleInfoStream.FindLinkerModule()->GetName().begin());
     for (const PDB::ModuleInfoStream::Module& module : modules)
     {
         if (!module.HasSymbolStream())
@@ -142,7 +142,15 @@ void ProcessSymbols(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStr
         }
         if (shouldPrint)
         {
-            printf("module  \n\t%s\n\t%s\n", moduleObjname, moduleName);
+            // when passing source files straight through to the linker
+            // (not using -c to compile to obj, then manually linking)
+            // those obj files end up in AppData/Local/Temp (at least on my machine)
+            bool isModuleTempFile = strstr(moduleName, "AppData\\Local\\Temp");
+            bool isModuleLocalCode = strstr(moduleName, "C:\\Dev\\pdbparse_playground");
+            if (isModuleTempFile || isModuleLocalCode)
+            {
+                printf("===== module  \n\t%s\n\t%s\n", moduleObjname, moduleName);
+            }
         }
         const PDB::ModuleSymbolStream moduleSymbolStream = module.CreateSymbolStream(rawPdbFile);
         moduleSymbolStream.ForEachSymbol([&imageSectionStream](const PDB::CodeView::DBI::Record* record)
@@ -213,18 +221,131 @@ void ProcessSymbols(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStr
                 // certain symbols (e.g. control-flow guard symbols) don't have a valid RVA, ignore those
                 return;
             }
-            printf("%s : %i\n", name, rva);
+            //printf("%s : %i\n", name, rva);
         });
+        //printf("===== end module\n");
     }
     printf("===================\n");
-    }
+}
 
+void collect_relevant_modules(const PDB::ModuleInfoStream& moduleInfoStream, std::vector<const PDB::ModuleInfoStream::Module*>& outModules)
+{
+    const PDB::ArrayView<PDB::ModuleInfoStream::Module> modules = moduleInfoStream.GetModules();
+    //printf("LinkerModule: %s\n", moduleInfoStream.FindLinkerModule()->GetName().begin());
+    for (const PDB::ModuleInfoStream::Module& module : modules)
+    {
+        if (!module.HasSymbolStream())
+        {
+            continue;
+        }
+        static const char* excludedSubstrs[] = 
+        {
+            "Microsoft Visual Studio",
+            "Windows Kits",
+        };
+        const char* moduleObjname = module.GetObjectName().begin();
+        const char* moduleName = module.GetName().begin();
+        bool shouldPrint = true;
+        for (int i = 0; i < sizeof(excludedSubstrs)/sizeof(excludedSubstrs[0]); i++)
+        {
+            if (strstr(moduleObjname, excludedSubstrs[i]) || strstr(moduleName, excludedSubstrs[i]))
+            {
+                shouldPrint = false;
+                break;
+            }
+        }
+        if (shouldPrint)
+        {
+            // when passing source files straight through to the linker
+            // (not using -c to compile to obj, then manually linking)
+            // those obj files end up in AppData/Local/Temp (at least on my machine)
+            bool isModuleTempFile = strstr(moduleName, "AppData\\Local\\Temp");
+            bool isModuleLocalCode = strstr(moduleName, "C:\\Dev\\pdbparse_playground");
+            if (isModuleTempFile || isModuleLocalCode)
+            {
+                outModules.push_back(&module);
+                //printf("===== module  \n\t%s\n\t%s\n", moduleObjname, moduleName);
+            }
+        }
+    }
+}
+
+void process_possible_data_symbol(
+    const PDB::CodeView::DBI::Record* record,
+    const TypeTable& typeTable)
+{
+    using SRK = PDB::CodeView::DBI::SymbolRecordKind;
+    const SRK kind = record->header.kind;
+    const PDB::CodeView::DBI::Record::Data& data = record->data;
+    switch (kind)
+    {
+        case SRK::S_LDATA32:  // (static) local data
+        {
+            //std::string varTypeName = GetVariableTypeName(typeTable, data.S_LDATA32.typeIndex);
+            printf("Found static local data %s\n", data.S_LDATA32.name);
+        } break;
+        case SRK::S_GDATA32:  // global data
+        {
+            printf("Found global data %s\n", data.S_GDATA32.name);
+        } break;
+        case SRK::S_PUB32:  // public symbol
+        {
+            printf("Found public symbol %s\n", data.S_PUB32.name);
+        } break;
+        case SRK::S_LTHREAD32:  // (static) thread-local data
+        {
+            printf("Found (static) thread-local data %s\n", data.S_LTHREAD32.name);
+        } break;
+        case SRK::S_GTHREAD32:  // global thread-local data
+        {
+            printf("Found global thread-local data %s\n", data.S_GTHREAD32.name);
+        } break;
+        default:
+        {
+            // schmeep schmop
+        } break;
+    }
+    
+}
+
+void ProcessSymbols(
+    const PDB::RawFile& rawPdbFile, 
+    const PDB::DBIStream& dbiStream, 
+    const PDB::TPIStream& tpiStream)
+{
+    // needed for both public and global streams
+    const PDB::CoalescedMSFStream symbolRecordStream = dbiStream.CreateSymbolRecordStream(rawPdbFile);
+    const PDB::PublicSymbolStream publicSymbolStream = dbiStream.CreatePublicSymbolStream(rawPdbFile);
+	const PDB::GlobalSymbolStream globalSymbolStream = dbiStream.CreateGlobalSymbolStream(rawPdbFile);
+	const PDB::ModuleInfoStream moduleInfoStream = dbiStream.CreateModuleInfoStream(rawPdbFile);
+    const PDB::ImageSectionStream imageSectionStream = dbiStream.CreateImageSectionStream(rawPdbFile);
+    TypeTable typeTable(tpiStream);
+
+    //public_symbols_stream(publicSymbolStream, symbolRecordStream, imageSectionStream);
+    //global_symbols_stream(globalSymbolStream, symbolRecordStream, imageSectionStream);
+	//module_symbol_stream(moduleInfoStream, symbolRecordStream, imageSectionStream, rawPdbFile);
+    std::vector<const PDB::ModuleInfoStream::Module*> relevantModules = {};
+    relevantModules.reserve(50);
+    collect_relevant_modules(moduleInfoStream, relevantModules);
+    printf("processing %zu relevant modules\n", relevantModules.size());
+    for (const PDB::ModuleInfoStream::Module* module : relevantModules)
+    {
+        printf("\t%s\n", module->GetName().begin());
+        const PDB::DBI::ModuleInfo* moduleInfo = module->GetInfo();
+        if (module->HasSymbolStream())
+        {
+            PDB::ModuleSymbolStream moduleSymbolStream = module->CreateSymbolStream(rawPdbFile);
+            moduleSymbolStream.ForEachSymbol([&typeTable](const PDB::CodeView::DBI::Record* record){
+                process_possible_data_symbol(record, typeTable);
+            });
+        }
+    }
 }
 
 int main()
 {
     // open memmapped pdb file
-    const char* pdbPath = "Axe64Lib.pdb";
+    const char* pdbPath = "../TestProj/main.pdb";
     MemoryMappedFile::Handle pdbFile = MemoryMappedFile::Open(pdbPath);
     void* pdbFileData = pdbFile.baseAddress;
     // make sure it's well-formed
@@ -270,7 +391,7 @@ int main()
 		MemoryMappedFile::Close(pdbFile);
 	    return 5;
 	}
-    ProcessSymbols(rawPdbFile, dbiStream);
+    ProcessSymbols(rawPdbFile, dbiStream, tpiStream);
 	MemoryMappedFile::Close(pdbFile);
     #ifdef _WIN32
     //system("pause");
