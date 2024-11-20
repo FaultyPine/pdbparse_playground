@@ -13,6 +13,8 @@
 #include "mapped_file.h"
 #include <vector>
 
+#define MODULE_LOCAL_PATH_START "C:\\Fenris"
+
 // mostly 1:1 with
 // https://github.com/MolecularMatters/raw_pdb/blob/main/src/Examples/ExampleMain.cpp
 PDB_NO_DISCARD static bool HasValidDBIStreams(const PDB::RawFile& rawPdbFile, const PDB::DBIStream& dbiStream);
@@ -260,7 +262,7 @@ void collect_relevant_modules(const PDB::ModuleInfoStream& moduleInfoStream, std
             // (not using -c to compile to obj, then manually linking)
             // those obj files end up in AppData/Local/Temp (at least on my machine)
             bool isModuleTempFile = strstr(moduleName, "AppData\\Local\\Temp");
-            bool isModuleLocalCode = strstr(moduleName, "C:\\Dev\\pdbparse_playground");
+            bool isModuleLocalCode = strstr(moduleName, MODULE_LOCAL_PATH_START);
             if (isModuleTempFile || isModuleLocalCode)
             {
                 outModules.push_back(&module);
@@ -270,6 +272,11 @@ void collect_relevant_modules(const PDB::ModuleInfoStream& moduleInfoStream, std
     }
 }
 
+bool prefix(const char *pre, const char *str)
+{
+    return strncmp(pre, str, strlen(pre)) == 0;
+}
+
 void process_possible_data_symbol(
     const PDB::CodeView::DBI::Record* record,
     const TypeTable& typeTable)
@@ -277,28 +284,34 @@ void process_possible_data_symbol(
     using SRK = PDB::CodeView::DBI::SymbolRecordKind;
     const SRK kind = record->header.kind;
     const PDB::CodeView::DBI::Record::Data& data = record->data;
+    #define SANITY_CHECK_NAME(symbolRecordKind) if (strstr(data.symbolRecordKind.name, "@")) break; if (prefix("__", data.symbolRecordKind.name)) break;
     switch (kind)
     {
         case SRK::S_LDATA32:  // (static) local data
         {
+            SANITY_CHECK_NAME(S_LDATA32);
             //std::string varTypeName = GetVariableTypeName(typeTable, data.S_LDATA32.typeIndex);
-            printf("Found static local data %s\n", data.S_LDATA32.name);
+            printf("\tFound static local data %s\n", data.S_LDATA32.name);
         } break;
         case SRK::S_GDATA32:  // global data
         {
-            printf("Found global data %s\n", data.S_GDATA32.name);
+            SANITY_CHECK_NAME(S_GDATA32);
+            printf("\tFound global data %s\n", data.S_GDATA32.name);
         } break;
         case SRK::S_PUB32:  // public symbol
         {
-            printf("Found public symbol %s\n", data.S_PUB32.name);
+            SANITY_CHECK_NAME(S_PUB32);
+            printf("\tFound public symbol %s\n", data.S_PUB32.name);
         } break;
         case SRK::S_LTHREAD32:  // (static) thread-local data
         {
-            printf("Found (static) thread-local data %s\n", data.S_LTHREAD32.name);
+            SANITY_CHECK_NAME(S_LTHREAD32);
+            printf("\tFound (static) thread-local data %s\n", data.S_LTHREAD32.name);
         } break;
         case SRK::S_GTHREAD32:  // global thread-local data
         {
-            printf("Found global thread-local data %s\n", data.S_GTHREAD32.name);
+            SANITY_CHECK_NAME(S_GTHREAD32);
+            printf("\tFound global thread-local data %s\n", data.S_GTHREAD32.name);
         } break;
         default:
         {
@@ -330,14 +343,15 @@ void ProcessSymbols(
     printf("processing %zu relevant modules\n", relevantModules.size());
     for (const PDB::ModuleInfoStream::Module* module : relevantModules)
     {
-        printf("\t%s\n", module->GetName().begin());
         const PDB::DBI::ModuleInfo* moduleInfo = module->GetInfo();
         if (module->HasSymbolStream())
         {
+            printf("module\n{\n%s\n", module->GetName().begin());
             PDB::ModuleSymbolStream moduleSymbolStream = module->CreateSymbolStream(rawPdbFile);
             moduleSymbolStream.ForEachSymbol([&typeTable](const PDB::CodeView::DBI::Record* record){
                 process_possible_data_symbol(record, typeTable);
             });
+            printf("\n}\n");
         }
     }
 }
@@ -345,7 +359,7 @@ void ProcessSymbols(
 int main()
 {
     // open memmapped pdb file
-    const char* pdbPath = "../TestProj/main.pdb";
+    const char* pdbPath = "Axe64Lib.pdb";
     MemoryMappedFile::Handle pdbFile = MemoryMappedFile::Open(pdbPath);
     void* pdbFileData = pdbFile.baseAddress;
     // make sure it's well-formed

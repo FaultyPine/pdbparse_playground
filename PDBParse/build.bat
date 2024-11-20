@@ -11,7 +11,7 @@ set LINKER_ARGS=-Xlinker /SUBSYSTEM:CONSOLE -luser32 -lRawPDB -L"%cwd%external/r
 REM set sources=pdbparse_main.cpp DIA2Dump/DIA2Dump.cpp
 set sources=pdbparse_main.cpp mapped_file.cpp typetable.cpp
 REM set includes=-I"C:\Program Files\Microsoft Visual Studio\2022\Community\DIA SDK\include"
-set includes=-I"%cwd%external/raw_pdb/src"
+set includes=-I"%cwd%external\raw_pdb\src"
 clang %sources% -o ../main.exe -g -D_CONSOLE -mconsole %LINKER_ARGS% -Wno-trigraphs  %includes%
 
 popd
